@@ -1,0 +1,64 @@
+# Work flow to test, build and deploy a static webpage to an S3 bucket, whilst invalidating the cloudfront cache,
+
+# Just the name of our workflow (pipeline)
+name: Build/Deploy
+
+
+# Build triggers for our pipeline
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+# Defining our jobs that will run below
+jobs:
+  build:
+     
+    runs-on: ubuntu-latest # the platform we will run the build from/on.
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }} # just some
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }} #env
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }} #variables
+    
+    strategy:
+      matrix:
+        node-version: [14.x] # the version of node to run on
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Begin NPM Steps/Configure our NPM env
+      uses: actions/setup-node@v1
+      with:
+        node-version: ${{ matrix.node-version }}
+    - run: npm ci
+      name: Run NPM CI
+    - run: npm run test
+      continue-on-error: false
+      name: Run Build ONLY IF the following test succeeds
+    - run: npm run build --if-present
+      continue-on-error: false
+      name: Run Build
+    
+    # Uploads our artifact to github artifacts.
+    - name: Upload the build artifact to GitHub Artifacts #Even though we don't need to, it's worth doing if we ever need it.
+      uses: actions/upload-artifact@v2.1.4
+      with:
+        name: dist
+        path: build
+           
+    # Deploys our build to S3! Woooo!
+    - name: S3 and CloudFront Deploy
+      uses: lbertenasco/s3-deploy@v1.2.4
+      with:
+        folder: build
+        bucket: ${{ secrets.S3_BUCKET }}
+        dist-id: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+        invalidation: / *
+   
+   # Warms the cache on the CDN (Cloudfront) and also, test the URL is accessible.
+    - name: Fetch URL
+      uses: boyeborg/fetch-url-action@v1.1
+      with:
+        url: https://d1lbvo89f7ulf7.cloudfront.net
+
